@@ -1,3 +1,4 @@
+
 # VeraDemo - Blab-a-Gag (Django-Python)
 
 ### Notice
