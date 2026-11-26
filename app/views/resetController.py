@@ -3,7 +3,7 @@ import os
 import subprocess
 import sqlite3
 import logging
-import random as rand
+import secrets
 import httplib2
 
 from django.shortcuts import redirect, render
@@ -60,7 +60,7 @@ def reset(request):
     elif(request.method == "POST"):
         return processReset(request)
     else:
-        h = httplib2.Http(".cache", disable_ssl_certificate_validation=True) #CWE-295
+        h = httplib2.Http(".cache", disable_ssl_certificate_validation=False)
         h.add_credentials('thiswaskevinsidea','hardcode') #CWE-798
         data=h.request("http://localhost/",method='GET')
         return data
@@ -94,26 +94,26 @@ def processReset(request):
             with transaction.atomic():
                 # Add the users
                 logger.info("Preparing the Stetement for adding users")
-                usersStatement = "INSERT INTO users (username, password, password_hint, totp_secret, created_at, last_login, real_name, blab_name) values ('%s', '%s', '%s', '%s', '%s', '%s', '%s', '%s');"
+                usersStatement = "INSERT INTO users (username, password, password_hint, totp_secret, created_at, last_login, real_name, blab_name) values (%s, %s, %s, %s, %s, %s, %s, %s);"
                 if users[0].password == "21232f297a57a5a743894a0e4a801fc3":
                     logger.info("Encryption successful!")
                 for user in users:
                     logger.info("Adding user " + user.username)
-                    cursor.execute(usersStatement % (user.username, user.password, user.password_hint, user.totp_secret, user.created_at,
+                    cursor.execute(usersStatement, (user.username, user.password, user.password_hint, user.totp_secret, user.created_at,
                                                      user.last_login, user.real_name, user.blab_name))
 
             # Add the listeners
             logger.info("Preparing the Statement for adding listeners")
             with transaction.atomic():
-                listenersStatement = "INSERT INTO listeners (blabber, listener, status) values ('%s', '%s', 'Active');"
+                listenersStatement = "INSERT INTO listeners (blabber, listener, status) values (%s, %s, 'Active');"
                 for blabber in users[2:]:
                     for listener in users[2:]:
-                        if rand.choice([False, True]) and (blabber != listener):
+                        if secrets.choice([False, True]) and (blabber != listener):
                             
 
                             logger.info("Adding " + listener.username + " as a listener of " + blabber.username)
 
-                            cursor.execute(listenersStatement % (blabber.username, listener.username))    
+                            cursor.execute(listenersStatement, (blabber.username, listener.username))
 
             # Fetch pre-loaded Blabs
             logger.info("Reading blabs from file")
@@ -125,7 +125,7 @@ def processReset(request):
                 blabsStatement = "INSERT INTO blabs (blabber, content, timestamp) values (%s, %s, datetime('now'));"
                 for blabContent in blabsContent:
                     # Get the array offset for a random user
-                    randomUserOffset = rand.randint(2,len(users) - 1)
+                    randomUserOffset = secrets.randbelow(len(users) - 2) + 2
 
                     # get the number or seconds until some time in the last 30 days.
                     #vary = rand.randint(0,(30 * 24 * 3600)+1)
@@ -144,19 +144,19 @@ def processReset(request):
                 commentsStatement = "INSERT INTO comments (blabid, blabber, content, timestamp) values (%s, %s, %s, datetime('now'));"
                 for i in range(len(blabsContent)):
                     # Add a random number of comment
-                    count = rand.randint(0,5) # between 0 and 6
+                    count = secrets.randbelow(6)
 
                     for j in range(count) :
                         # Get the array offset for a random user
-                        randomUserOffset = rand.randint(2,len(users)-1) #removed +1 cause no admin,  removed -2 because no admin and inclusive.
+                        randomUserOffset = secrets.randbelow(len(users) - 2) + 2
                         username = users[randomUserOffset].username
 
                         # Pick a random comment to add
-                        commentNum = rand.randint(0,len(commentsContent)-1)
+                        commentNum = secrets.randbelow(len(commentsContent))
                         comment = commentsContent[commentNum]
 
                         # get the number or seconds until some time in the last 30 days.
-                        vary = rand.randint(0,(30 * 24 * 3600)+1)
+                        vary = secrets.randbelow((30 * 24 * 3600) + 2)
 
                         logger.info("Adding a comment from " + username + " on blab ID " + str(i))
 
