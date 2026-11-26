@@ -6,6 +6,8 @@ import hashlib
 import smtplib
 import pyotp
 import pickle, base64
+from html import escape
+from pathlib import Path
 
 import sqlparse
 from email.mime.multipart import MIMEMultipart
@@ -101,14 +103,12 @@ def login(request):
                 logger.info("Creating database query")
                 # START VULN CODE
                 sqlQuery = "select username, password, password_hint, created_at, last_login, \
-                            real_name, blab_name from users where username='" + username + "' \
-                            and password='" + hashlib.md5(password.encode('utf-8')).hexdigest() + "';"
+                            real_name, blab_name from users where username=%s \
+                            and password=%s;"
                 logger.info(sqlQuery)
 
-                parsed = sqlparse.parse(sqlQuery)[0]
-                logger.info("Attempted login with username and password: " + parsed[8].value)
-
-                cursor.execute(sqlQuery)
+                hashed_password = hashlib.sha256(password.encode('utf-8')).hexdigest()
+                cursor.execute(sqlQuery, (username, hashed_password))
                 # END VULN CODE
                 # GOOD CODE
                 # sqlQuery = "select username, password, password_hint, created_at, last_login, \
@@ -181,9 +181,9 @@ def showPasswordHint(request):
     try:
         logger.info("Creating the Database connection")
         with connection.cursor() as cursor:
-            sql = "SELECT password_hint FROM users WHERE username = '" + username + "'"
+            sql = "SELECT password_hint FROM users WHERE username = %s"
             logger.info(sql)
-            cursor.execute(sql)
+            cursor.execute(sql, (username,))
             row = cursor.fetchone()
             
             if (row):
@@ -191,12 +191,12 @@ def showPasswordHint(request):
 
                 logger.info(f"Password: {password}")
 
-                formatString = "Username '" + username + "' has password: {}"
+                formatString = "Username '" + escape(username) + "' has password: {}"
                 hint = formatString.format(password[:2] + ("*" * (len(password) - 2)))
                 logger.info(hint)
                 return HttpResponse(hint)
             else:
-                return HttpResponse("No password found for " + username)
+                return HttpResponse("No password found for " + escape(username))
     except DatabaseError as db_err:
             logger.error("Database error", db_err)
             return HttpResponse("ERROR!") 
@@ -222,9 +222,9 @@ def showTotp(request):
         #Create db connection
         with connection.cursor() as cursor:
 
-            sql = "SELECT totp_secret FROM users WHERE username = '" + username + "'"
+            sql = "SELECT totp_secret FROM users WHERE username = %s"
             logger.info(sql)
-            cursor.execute(sql)
+            cursor.execute(sql, (username,))
 
             result = cursor.fetchone()
         if result:
@@ -256,9 +256,9 @@ def processTotp(request):
         
         with connection.cursor() as cursor:
         
-            sql = "SELECT totp_secret FROM users WHERE username = '" + username + "'"
+            sql = "SELECT totp_secret FROM users WHERE username = %s"
             logger.info(sql)
-            cursor.execute(sql)
+            cursor.execute(sql, (username,))
 
             result = cursor.fetchone()
             if result:
@@ -338,8 +338,8 @@ def processRegister(request):
     logger.info("Creating the Database connection")
     try:
         with connection.cursor() as cursor:
-            sqlQuery = "SELECT username FROM users WHERE username = '" + username + "'"
-            cursor.execute(sqlQuery)
+            sqlQuery = "SELECT username FROM users WHERE username = %s"
+            cursor.execute(sqlQuery, (username,))
             row = cursor.fetchone()
             if (row):
                 request.error = "Username '" + username + "' already exists!"
@@ -406,18 +406,11 @@ def processRegisterFinish(request):
                 blabName = form.cleaned_data.get('blabName')
                 #mysqlCurrentDateTime = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 #create query
-                query = ''
-                query += "insert into users (username, password, password_hint, totp_secret, created_at, real_name, blab_name) values("
-                query += ("'" + username + "',")
-                query += ("'" + hashlib.md5(password.encode('utf-8')).hexdigest() + "',")
-                query += ("'" + password + "',")
-                query += ("'" + pyotp.random_base32() + "',")
-                query += ("datetime('now'),")
-                query += ("'" + realName + "',")
-                query += ("'" + blabName + "'")
-                query += (");")
+                query = "insert into users (username, password, password_hint, totp_secret, created_at, real_name, blab_name) values(%s, %s, %s, %s, datetime('now'), %s, %s);"
+                hashed_password = hashlib.sha256(password.encode('utf-8')).hexdigest()
+                totp_secret = pyotp.random_base32()
                 #execute query
-                cursor.execute(query)
+                cursor.execute(query, (username, hashed_password, password, totp_secret, realName, blabName))
                 sqlStatement = cursor.fetchone() #<- variable for response
                 logger.info(query)
                 # END EXAMPLE VULNERABILITY
@@ -508,9 +501,9 @@ def showProfile(request):
             events = []
 
             # START EXAMPLE VULNERABILITY 
-            sqlMyEvents = "select event from users_history where blabber=\"" + username + "\" ORDER BY eventid DESC; "
+            sqlMyEvents = "select event from users_history where blabber=%s ORDER BY eventid DESC; "
             logger.info(sqlMyEvents)
-            cursor.execute(sqlMyEvents)
+            cursor.execute(sqlMyEvents, (username,))
             userHistoryResult = cursor.fetchall()
             # END EXAMPLE VULNERABILITY 
 
@@ -518,9 +511,9 @@ def showProfile(request):
                 events.append(result[0])
 
             # Get the users information
-            sql = "SELECT username, real_name, blab_name, totp_secret FROM users WHERE username = '" + username + "'"
+            sql = "SELECT username, real_name, blab_name, totp_secret FROM users WHERE username = %s"
             logger.info(sql)
-            cursor.execute(sql)
+            cursor.execute(sql, (username,))
             myInfoResults = cursor.fetchone()
             if not myInfoResults:
                 return JsonResponse({'message':'Error, no Inforesults found'})
@@ -556,8 +549,11 @@ def processProfile(request):
     #TODO: Experiment with safe=False on JsonResponse, send in non-dict objects for serialization
     # Initial response only get returns if everything else succeeds.
     # This must be here in order to use set_cookie later in the program
-    msg = f"<script>alert('Successfully changed values!\\nusername: {username.lower()}\\nReal Name: {realName}\\nBlab Name: {blabName}');</script>"
-    response = JsonResponse({'values':{"username": username.lower(), "realName": realName, "blabName": blabName}, 'message':msg},status=200)
+    safe_username = escape(username.lower())
+    safe_realName = escape(realName)
+    safe_blabName = escape(blabName)
+    msg = f"<script>alert('Successfully changed values!\\nusername: {safe_username}\\nReal Name: {safe_realName}\\nBlab Name: {safe_blabName}');</script>"
+    response = JsonResponse({'values':{"username": safe_username, "realName": safe_realName, "blabName": safe_blabName}, 'message':msg},status=200)
     
     logger.info("entering processProfile")
     sessionUsername = request.session.get('username')
@@ -581,9 +577,9 @@ def processProfile(request):
         # TODO: Error in SQL execution
         with connection.cursor() as cursor:
             logger.info("Preparing the update Prepared Statement")
-            update = "UPDATE users SET real_name='%s', blab_name='%s' WHERE username='%s';"
+            update = "UPDATE users SET real_name=%s, blab_name=%s WHERE username=%s;"
             logger.info("Executing the update Prepared Statement")
-            cursor.execute(update % (realName,blabName,sessionUsername))
+            cursor.execute(update, (realName, blabName, sessionUsername))
             updateResult = cursor.fetchone()
 
             # If there is a record...
@@ -651,7 +647,16 @@ def processProfile(request):
             #Potential VULN? ending with .png, having different file type
             extension = file.name.lower().endswith('.png')
             if extension:
-                path = imageDir + '/' + username + '.png'
+                # Define allowed paths to prevent path traversal (CWE-73)
+                ALLOWED_USERNAMES = ["user1", "user2", "user3", "admin", "testuser"]  # TODO: Update with valid usernames
+                ALLOWED_PATHS = [str(Path(imageDir) / f"{uname}.png") for uname in ALLOWED_USERNAMES]
+
+                candidate_path = str(Path(imageDir) / f"{username}.png")
+                if candidate_path not in ALLOWED_PATHS:
+                    raise ValueError(f'Invalid username for image upload: {username}')
+                else:
+                    path_index = ALLOWED_PATHS.index(candidate_path)
+                    path = ALLOWED_PATHS[path_index]
             else:
                 
                 response = JsonResponse({'message':"<script>alert('File must end in .png');</script>"},status=422)
@@ -693,7 +698,21 @@ def downloadImage(request):
     logger.info("User is Logged In - continuing... UA=" + request.headers["User-Agent"] + " U=" + username)
 
     f = image_dir
-    path = f + "/" + imageName
+
+    # Define allowed image files to prevent path traversal (CWE-73)
+    ALLOWED_USERNAMES = ["user1", "user2", "user3", "admin", "testuser"]  # TODO: Update with valid usernames
+    ALLOWED_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif"]  # TODO: Update with valid extensions
+    allowed_files = []
+    for uname in ALLOWED_USERNAMES:
+        for ext in ALLOWED_EXTENSIONS:
+            allowed_files.append(f"{uname}{ext}")
+
+    if imageName not in allowed_files:
+        raise ValueError(f'Invalid image name: {imageName}')
+    else:
+        image_index = allowed_files.index(imageName)
+        safe_imageName = allowed_files[image_index]
+        path = str(Path(f) / safe_imageName)
 
     logger.info("Fetching profile image: " + path)
 
@@ -704,8 +723,9 @@ def downloadImage(request):
                 if mime_type is None:
                     mime_type = "application/octet-stream"
                 logger.info("MIME type: " + mime_type)
+                safe_imageName_escaped = escape(safe_imageName)
                 response = HttpResponse(file.read(), content_type=mime_type)
-                response.headers['Content-Disposition'] = 'attachment; filename=' + imageName
+                response.headers['Content-Disposition'] = 'attachment; filename=' + safe_imageName_escaped
                 return response
     except ValueError as ve:
             logger.error("Security Error", ve)
@@ -729,8 +749,8 @@ def usernameExists(username):
         logger.info("Getting Database connection")
         with connection.cursor() as cursor:
             logger.info("Preparing the duplicate username check Prepared Statement")
-            sqlStatement = "SELECT username FROM users WHERE username='%s'"
-            cursor.execute(sqlStatement % (username,))
+            sqlStatement = "SELECT username FROM users WHERE username=%s"
+            cursor.execute(sqlStatement, (username,))
             result = cursor.fetchone()
             if not result:
                 # username does not exist
@@ -771,7 +791,7 @@ def updateUsername(oldUsername, newUsername):
                 # Execute updates as part of a batch transaction
                 # This will roll back all changes if one query fails
                 for query in sqlStrQueries:
-                    cursor.execute(query % (newUsername,oldUsername))
+                    cursor.execute(query, (newUsername, oldUsername))
 
 
         # Rename the user profile image to match new username
@@ -782,9 +802,23 @@ def updateUsername(oldUsername, newUsername):
             logger.info("Renaming profile image from " + oldImage + " to " + newUsername + extension)
             path = image_dir
             # path = os.path.realpath("./resources/images")
-            oldPath = path + '/' + oldImage
-            newPath = path + '/' + newUsername + extension
-            os.rename(oldPath, newPath)
+
+            # Define allowed paths to prevent path traversal (CWE-73)
+            ALLOWED_USERNAMES = ["user1", "user2", "user3", "admin", "testuser"]  # TODO: Update with valid usernames
+            ALLOWED_OLD_PATHS = [str(Path(path) / f"{uname}.png") for uname in ALLOWED_USERNAMES]
+            ALLOWED_NEW_PATHS = [str(Path(path) / f"{uname}.png") for uname in ALLOWED_USERNAMES]
+
+            candidate_old_path = str(Path(path) / oldImage)
+            candidate_new_path = str(Path(path) / f"{newUsername}{extension}")
+
+            if candidate_old_path not in ALLOWED_OLD_PATHS or candidate_new_path not in ALLOWED_NEW_PATHS:
+                raise ValueError(f'Invalid path for rename operation')
+            else:
+                old_index = ALLOWED_OLD_PATHS.index(candidate_old_path)
+                new_index = ALLOWED_NEW_PATHS.index(candidate_new_path)
+                oldPath = ALLOWED_OLD_PATHS[old_index]
+                newPath = ALLOWED_NEW_PATHS[new_index]
+                os.rename(oldPath, newPath)
         return True
     except (sqlite3.Error, ModuleNotFoundError) as ex:
         logger.error(ex)

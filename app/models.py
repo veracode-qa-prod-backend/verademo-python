@@ -26,7 +26,7 @@ def create(userName, blabName,realName):
     password = userName
     dateCreated = moment.now().format("YYYY-MM-DD hh:mm:ss")
     lastLogin = None
-    return User(userName, hashlib.md5(password.encode('utf-8')).hexdigest(), userName, pyotp.random_base32(), dateCreated, lastLogin, realName, blabName)
+    return User(userName, hashlib.sha256(password.encode('utf-8')).hexdigest(), userName, pyotp.random_base32(), dateCreated, lastLogin, realName, blabName)
 
 # Table for a blab, which is a message on the website
 class Blab(models.Model):
