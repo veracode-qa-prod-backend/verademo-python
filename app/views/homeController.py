@@ -8,13 +8,29 @@ import urllib
 def home(request):
     # Equivalent of HomeController.java
     if request.session.get('username'):
-        # START BAD CODE
+        # CWE-73 Fix: Use allow-list to prevent path traversal
         try:
+            # TODO: Configure these allowed URLs for your application's valid redirect targets
+            ALLOWED_URLS = [
+                'http://localhost:8000/feed',
+                'http://127.0.0.1:8000/feed',
+                # Add other valid URLs here
+            ]
+
+            # Construct the tainted URL from user input
             host_ip = request.META['HTTP_HOST'].split(':')[0]
             print("da")
-            redir = urllib.request.Request('http://' + host_ip + ':' + request.META['SERVER_PORT'] + '/feed')
+            tainted_url = 'http://' + host_ip + ':' + request.META['SERVER_PORT'] + '/feed'
+
+            # Validate against allow-list and retrieve untainted URL
+            if tainted_url not in ALLOWED_URLS:
+                raise ValueError(f'Invalid redirect URL: {tainted_url}')
+
+            url_index = ALLOWED_URLS.index(tainted_url)
+            safe_url = ALLOWED_URLS[url_index]  # Use untainted URL from allow-list
+
+            redir = urllib.request.Request(safe_url)
             urllib.request.urlopen(redir, timeout=5)
-        # END BAD CODE
         except: 
             # GOOD CODE:
             print("redir")

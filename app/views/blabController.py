@@ -5,6 +5,7 @@ blabController interacts with blabs, and loads relevent pages such as 'Feed' and
 import logging
 import moment
 import sys
+from html import escape
 
 from django.shortcuts import redirect, render
 from django.http import HttpResponse
@@ -24,11 +25,11 @@ logger = logging.getLogger("VeraDemo:blabController")
 
 sqlBlabsByMe = ("SELECT blabs.content, blabs.timestamp, COUNT(comments.blabber), blabs.blabid "
                 "FROM blabs LEFT JOIN comments ON blabs.blabid = comments.blabid "
-                "WHERE blabs.blabber = '%s' GROUP BY blabs.blabid ORDER BY blabs.timestamp DESC;")
+                "WHERE blabs.blabber = %s GROUP BY blabs.blabid ORDER BY blabs.timestamp DESC;")
 
 sqlBlabsForMe = ("SELECT users.username, users.blab_name, blabs.content, blabs.timestamp, COUNT(comments.blabber), blabs.blabid "
                 "FROM blabs INNER JOIN users ON blabs.blabber = users.username INNER JOIN listeners ON blabs.blabber = listeners.blabber "
-                "LEFT JOIN comments ON blabs.blabid = comments.blabid WHERE listeners.listener = '%s' "
+                "LEFT JOIN comments ON blabs.blabid = comments.blabid WHERE listeners.listener = %s "
                 "GROUP BY blabs.blabid ORDER BY blabs.timestamp DESC LIMIT {} OFFSET {};")
 
 #
@@ -48,7 +49,7 @@ def feed(request):
 
                 logger.info("Executing query to get all 'Blabs for me'")
                 blabsForMe = sqlBlabsForMe.format(10, 0)
-                cursor.execute(blabsForMe % (username,))
+                cursor.execute(blabsForMe, (username,))
                 blabsForMeResults = cursor.fetchall()
 
                 feedBlabs = []
@@ -72,7 +73,7 @@ def feed(request):
                 # Find the Blabs by this user
 
                 logger.info("Executing query to get all of user's Blabs")
-                cursor.execute(sqlBlabsByMe % (username,))
+                cursor.execute(sqlBlabsByMe, (username,))
                 blabsByMeResults = cursor.fetchall()
 
                 myBlabs = []
@@ -114,10 +115,10 @@ def feed(request):
             with connection.cursor() as cursor:
 
                 logger.info("Creating query to add new Blab")
-                addBlabSql = "INSERT INTO blabs (blabber, content, timestamp) values ('%s', '%s', datetime('now'));"
+                addBlabSql = "INSERT INTO blabs (blabber, content, timestamp) values (%s, %s, datetime('now'));"
 
                 logger.info("Executing query to add new blab")
-                cursor.execute(addBlabSql % (username, blab))
+                cursor.execute(addBlabSql, (username, blab))
 
                 if not cursor.rowcount:
                     request.error = "Failed to add blab"
@@ -159,11 +160,11 @@ def morefeed(request):
 
             logger.info("Executing query to see more Blabs")
             blabsForMe = sqlBlabsForMe.format(len, cnt)
-            cursor.execute(blabsForMe % (username,))
+            cursor.execute(blabsForMe, (username,))
             results = cursor.fetchall()
             ret = ""
             for blab in results:
-                ret += template.format(username = blab[0], content = blab[2], blab_name = blab[1],
+                ret += template.format(username = escape(blab[0]), content = escape(blab[2]), blab_name = escape(blab[1]),
                                        timestamp = blab[3].strftime("%b %d %Y"), blabid = blab[5], count = blab[4])    
     except ConnectionError as ce:
         logger.error("Unexpected connection error", ce)
@@ -187,18 +188,18 @@ def blab(request):
         logger.info("User is Logged In - continuing... UA=" + request.headers["User-Agent"] + " U=" + username)
 
         blabDetailsSql = ("SELECT blabs.content, users.blab_name "
-                "FROM blabs INNER JOIN users ON blabs.blabber = users.username " + "WHERE blabs.blabid = '%s';")
+                "FROM blabs INNER JOIN users ON blabs.blabber = users.username " + "WHERE blabs.blabid = %s;")
 
         blabCommentsSql = ("SELECT users.username, users.blab_name, comments.content, comments.timestamp "
                 "FROM comments INNER JOIN users ON comments.blabber = users.username "
-                "WHERE comments.blabid = '%s' ORDER BY comments.timestamp DESC;")
+                "WHERE comments.blabid = %s ORDER BY comments.timestamp DESC;")
         
         try :
             logger.info("Creating the Database connection")
             with connection.cursor() as cursor:
 
                 logger.info("Executing query to see Blab details")
-                cursor.execute(blabDetailsSql % (blabid,))
+                cursor.execute(blabDetailsSql, (blabid,))
                 blabDetailsResults = cursor.fetchone()
 
                 if (blabDetailsResults):
@@ -208,7 +209,7 @@ def blab(request):
 
                     # Get comments
                     logger.info("Executing query to get all comments")
-                    cursor.execute(blabCommentsSql % (blabid,))
+                    cursor.execute(blabCommentsSql, (blabid,))
                     blabCommentsResults = cursor.fetchall()
 
                     comments = []
@@ -247,14 +248,14 @@ def blab(request):
         
         logger.info("User is Logged In - continuing... UA=" + request.headers["User-Agent"] + " U=" + username)
 
-        addCommentSql = "INSERT INTO comments (blabid, blabber, content, timestamp) values ('%s', '%s', '%s', '%s');"
+        addCommentSql = "INSERT INTO comments (blabid, blabber, content, timestamp) values (%s, %s, %s, %s);"
 
         try :
             logger.info("Creating the Database connection")
             with connection.cursor() as cursor:
 
                 logger.info("Executing addComment")
-                cursor.execute(addCommentSql % (blabid, username, comment, moment.now().format("YYYY-MM-DD hh:mm:ss")))
+                cursor.execute(addCommentSql, (blabid, username, comment, moment.now().format("YYYY-MM-DD hh:mm:ss")))
                 
                 if not cursor.rowcount:
                     request.error = "Failed to add comment"
@@ -286,10 +287,10 @@ def blabbers(request):
         logger.info("User is Logged In - continuing... UA=" + request.headers["User-Agent"] + " U=" + username)
 
         blabbersSql = ("SELECT users.username," + " users.blab_name," + " users.created_at,"
-                    " SUM(iif(listeners.listener='%s', 1, 0)) as listeners,"
+                    " SUM(iif(listeners.listener=%s, 1, 0)) as listeners,"
                     " SUM(iif(listeners.status='Active',1,0)) as listening"
                     " FROM users LEFT JOIN listeners ON users.username = listeners.blabber"
-                    " WHERE users.username NOT IN (\"admin\",\"admin-totp\",'%s')" + " GROUP BY users.username" + " ORDER BY " + sort + ";")
+                    " WHERE users.username NOT IN (\"admin\",\"admin-totp\",%s)" + " GROUP BY users.username" + " ORDER BY " + sort + ";")
 
         try:
             logger.info("Creating database connection")
@@ -297,7 +298,7 @@ def blabbers(request):
 
                 logger.info(blabbersSql)
                 logger.info("Executing query to see Blab details")
-                cursor.execute(blabbersSql % (username, username))
+                cursor.execute(blabbersSql, (username, username))
                 blabbersResults = cursor.fetchall()
 
                 blabbers = []
